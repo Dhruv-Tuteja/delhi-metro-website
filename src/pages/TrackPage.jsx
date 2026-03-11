@@ -88,7 +88,7 @@ function TrackingIdEntry({ onSubmit }) {
 
 // ─── Live tracking view ──────────────────────────────────────────────────────
 
-function LiveTrackingView({ trackingId }) {
+function LiveTrackingView({ trackingId, onBack }) {
   const {
     session,
     locationHistory,
@@ -120,7 +120,7 @@ function LiveTrackingView({ trackingId }) {
       {/* Left sidebar */}
       <aside className={styles.sidebar}>
         <div className={styles.sidebarHeader}>
-          <button className={styles.backBtn} onClick={() => navigate('/')}>
+          <button className={styles.backBtn} onClick={onBack}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
               <path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
@@ -218,8 +218,13 @@ export default function TrackPage() {
     navigate(`/track/${id}`, { replace: true });
   }, [navigate]);
 
+  const handleBack = useCallback(() => {
+    setActiveId(null);
+    navigate('/', { replace: true });
+  }, [navigate]);
+
   if (activeId) {
-    return <LiveTrackingView trackingId={activeId} />;
+    return <LiveTrackingView trackingId={activeId} onBack={handleBack} />;
   }
 
   return (
