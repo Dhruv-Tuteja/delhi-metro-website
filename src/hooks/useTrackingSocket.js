@@ -55,7 +55,11 @@ export function useTrackingSocket(trackingId) {
       setLocationHistory(data.gpsBuffer || []);
       setVisitedStationIds(data.visitedStationIds || []);
       setSignalLost(data.signalLost || false);
-      if (data.hadSosAlert) setSosAlert({ fromSnapshot: true });
+      if (data.hadSosAlert) setSosAlert({
+        fromSnapshot: true,
+        stationName: data.lastSosStationName || null,
+        timestamp: data.lastSosTimestamp || null,
+      });
     });
 
     // Live location updates
@@ -65,11 +69,15 @@ export function useTrackingSocket(trackingId) {
       setSignalLost(false);
     });
 
-    // Station crossing
-    socket.on('station:visited', ({ stationId }) => {
-      setVisitedStationIds((prev) =>
-        prev.includes(stationId) ? prev : [...prev, stationId]
-      );
+    // Station crossing — allVisitedStationIds handles manual jumps that skip stations
+    socket.on('station:visited', ({ stationId, allVisitedStationIds }) => {
+      if (allVisitedStationIds && allVisitedStationIds.length > 0) {
+        setVisitedStationIds(allVisitedStationIds);
+      } else {
+        setVisitedStationIds((prev) =>
+          prev.includes(stationId) ? prev : [...prev, stationId]
+        );
+      }
     });
 
     // Signal monitoring
