@@ -1,4 +1,4 @@
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useTrackingSocket } from '../hooks/useTrackingSocket';
 import LiveMap from '../components/LiveMap';
@@ -120,7 +120,9 @@ function LiveTrackingView({ trackingId }) {
       {/* Left sidebar */}
       <aside className={styles.sidebar}>
         <div className={styles.sidebarHeader}>
-          <button className={styles.backBtn} onClick={() => navigate('/')}>
+          <button className={styles.backBtn} onClick={() => {
+            navigate('/', { replace: true });
+          }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
               <path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
@@ -187,10 +189,22 @@ function LiveTrackingView({ trackingId }) {
 
         {!session?.isActive && session && (
           <div className={styles.endedBanner}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-              <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            Journey completed · {session.destinationStation}
+            <div className={styles.endedLeft}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              Journey completed · {session.destinationStation}
+            </div>
+            <button
+              className={styles.replayBtn}
+              onClick={() => navigate(`/replay/${trackingId}`)}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                <path d="M1 4v6h6M23 20v-6h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              Replay Trip
+            </button>
           </div>
         )}
       </main>
@@ -258,7 +272,7 @@ function ReplayView({ trackingId }) {
     <div className={styles.trackingLayout}>
       <aside className={styles.sidebar}>
         <div className={styles.sidebarHeader}>
-          <button className={styles.backBtn} onClick={() => navigate(-1)}>
+          <button className={styles.backBtn} onClick={() => window.history.length > 1 ? navigate(-1) : navigate('/')}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
               <path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
@@ -274,7 +288,7 @@ function ReplayView({ trackingId }) {
     <div className={styles.trackingLayout}>
       <aside className={styles.sidebar}>
         <div className={styles.sidebarHeader}>
-          <button className={styles.backBtn} onClick={() => navigate(-1)}>
+          <button className={styles.backBtn} onClick={() => window.history.length > 1 ? navigate(-1) : navigate('/')}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
               <path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
@@ -305,7 +319,7 @@ function ReplayView({ trackingId }) {
     <div className={styles.trackingLayout}>
       <aside className={styles.sidebar}>
         <div className={styles.sidebarHeader}>
-          <button className={styles.backBtn} onClick={() => navigate(-1)}>
+          <button className={styles.backBtn} onClick={() => window.history.length > 1 ? navigate(-1) : navigate('/')}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
               <path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
@@ -418,11 +432,12 @@ const ctrlBtn = {
 
 export default function TrackPage({ isReplay = false }) {
   const { trackingId: paramId } = useParams();
+  const { pathname } = useLocation();
   const navigate = useNavigate();
-  const [activeId, setActiveId] = useState(paramId || null);
+  // Derive activeId from URL — so navigating to '/' always clears it
+  const activeId = paramId || null;
 
   const handleSubmit = useCallback((id) => {
-    setActiveId(id);
     navigate(`/track/${id}`, { replace: true });
   }, [navigate]);
 
