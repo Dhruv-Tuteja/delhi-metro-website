@@ -303,10 +303,10 @@ function ReplayView({ trackingId }) {
   const visiblePath = replay.gpsPath.slice(0, playIndex + 1);
   const progress = replay.gpsPath.length > 0 ? (playIndex / (replay.gpsPath.length - 1)) * 100 : 0;
 
-  // Compute which stations are "visited" at current replay position
-  const currentTimestamp = visiblePath[visiblePath.length - 1]?.timestamp || 0;
-  // All visited stations are shown once playback reaches the end
-  const replayVisitedIds = progress >= 99 ? replay.visitedStationIds : [];
+  // Mark stations progressively as playback advances
+  // visitedStationIds is ordered source→destination, so slice by progress fraction
+  const visitedCount = Math.ceil((progress / 100) * replay.visitedStationIds.length);
+  const replayVisitedIds = replay.visitedStationIds.slice(0, visitedCount);
 
   const formatDate = (ts) => ts ? new Date(ts).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
   const formatDuration = (start, end) => {
