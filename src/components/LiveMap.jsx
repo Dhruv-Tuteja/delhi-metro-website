@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import styles from './LiveMap.module.css';
@@ -88,23 +88,24 @@ export default function LiveMap({
 
   const tileLayerRef = useRef(null);
 
-  // Detect current theme from html[data-theme]
-  const getTheme = () => document.documentElement.getAttribute('data-theme') || 'dark';
-  const [mapTheme, setMapTheme] = useState(getTheme);
+  const getTileUrl = () => {
+    const theme = document.documentElement.getAttribute('data-theme') || 'dark';
+    return theme === 'light'
+      ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+      : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+  };
 
-  // Watch for theme changes via MutationObserver
-  useEffect(() => {
-    const observer = new MutationObserver(() => setMapTheme(getTheme()));
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    return () => observer.disconnect();
-  }, []);
+  const applyTileLayer = (map) => {
+    if (tileLayerRef.current) map.removeLayer(tileLayerRef.current);
+    tileLayerRef.current = L.tileLayer(getTileUrl(), { maxZoom: 19 }).addTo(map);
+  };
 
-  // Initialize map on mount
+  // Initialize map on mount — tile layer applied immediately with correct theme
   useEffect(() => {
     if (mapInstanceRef.current) return;
 
     const map = L.map(mapRef.current, {
-      center: [28.6139, 77.2090], // Delhi centre
+      center: [28.6139, 77.2090],
       zoom: 12,
       zoomControl: false,
       attributionControl: false,
@@ -113,28 +114,22 @@ export default function LiveMap({
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     L.control.attribution({ position: 'bottomleft', prefix: '© OpenStreetMap © CARTO' }).addTo(map);
 
+    // Apply correct tile layer immediately on init
+    applyTileLayer(map);
     mapInstanceRef.current = map;
+
+    // Watch for theme changes and swap tiles live
+    const observer = new MutationObserver(() => {
+      if (mapInstanceRef.current) applyTileLayer(mapInstanceRef.current);
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
     return () => {
+      observer.disconnect();
       map.remove();
       mapInstanceRef.current = null;
     };
   }, []);
-
-  // Swap tile layer when theme changes
-  useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
-
-    if (tileLayerRef.current) {
-      map.removeLayer(tileLayerRef.current);
-    }
-
-    const tileUrl = mapTheme === 'light'
-      ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
-      : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
-
-    tileLayerRef.current = L.tileLayer(tileUrl, { maxZoom: 19 }).addTo(map);
-  }, [mapTheme]);
 
   // Render/update station markers when route changes
   useEffect(() => {
