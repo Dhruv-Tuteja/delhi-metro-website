@@ -55,6 +55,42 @@
   --shadow-glow: 0 0 32px var(--color-accent-glow);
 }
 
+
+/* ─────────────────────────────────────────────────────────────────
+   LIGHT MODE TOKENS
+───────────────────────────────────────────────────────────────── */
+[data-theme="light"] {
+  --color-bg:           #f0f4fb;
+  --color-surface:      #ffffff;
+  --color-surface-2:    #e8eef8;
+  --color-surface-3:    #dde5f2;
+  --color-border:       rgba(0,0,0,0.08);
+  --color-border-hover: rgba(0,0,0,0.15);
+
+  --color-text-primary:   #0d1526;
+  --color-text-secondary: #4a5a78;
+  --color-text-muted:     #8899bb;
+
+  --color-accent:       #1a6fe0;
+  --color-accent-glow:  rgba(26,111,224,0.12);
+  --color-accent-hover: #1558b8;
+
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.08), 0 4px 16px rgba(0,0,0,0.06);
+  --shadow-glow: 0 0 32px var(--color-accent-glow);
+}
+
+/* Smooth theme transitions */
+*, *::before, *::after {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.15s ease;
+}
+
+/* Exception — no transition on map tiles and animated elements */
+.leaflet-tile,
+.leaflet-marker-icon,
+[class*="animate-"] {
+  transition: none !important;
+}
+
 /* ─────────────────────────────────────────────────────────────────
    RESET & BASE
 ───────────────────────────────────────────────────────────────── */
@@ -85,6 +121,10 @@ body {
 .leaflet-container {
   background: #0d1520 !important;
   font-family: var(--font-body) !important;
+}
+
+[data-theme="light"] .leaflet-container {
+  background: #e8eef8 !important;
 }
 
 /* Custom scrollbar */

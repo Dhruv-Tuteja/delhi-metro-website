@@ -16,6 +16,9 @@ export default function App() {
         {/* Direct link from SMS — goes straight to live map */}
         <Route path="/track/:trackingId" element={<TrackPage />} />
 
+        {/* Trip replay — /replay/TRK-XXXXXX */}
+        <Route path="/replay/:trackingId" element={<TrackPage isReplay />} />
+
         {/* Help Center + Bug Report */}
         <Route path="/help" element={<HelpCenter />} />
 

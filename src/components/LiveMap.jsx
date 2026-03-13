@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import styles from './LiveMap.module.css';
@@ -13,9 +13,8 @@ L.Icon.Default.mergeOptions({
 
 // Segment path colors
 const SEGMENT_COLORS = {
-  metro:   '#3d8ef8',
-  walking: '#22c55e',
-  vehicle: '#f59e0b',
+  metro:   '#3d8ef8',  // Blue  — confirmed metro leg
+  transit: '#94a3b8',  // Slate — everything else (walking, rickshaw, waiting)
 };
 
 /**
@@ -87,6 +86,19 @@ export default function LiveMap({
     stationMarkers: new Map(),
   });
 
+  const tileLayerRef = useRef(null);
+
+  // Detect current theme from html[data-theme]
+  const getTheme = () => document.documentElement.getAttribute('data-theme') || 'dark';
+  const [mapTheme, setMapTheme] = useState(getTheme);
+
+  // Watch for theme changes via MutationObserver
+  useEffect(() => {
+    const observer = new MutationObserver(() => setMapTheme(getTheme()));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, []);
+
   // Initialize map on mount
   useEffect(() => {
     if (mapInstanceRef.current) return;
@@ -98,11 +110,6 @@ export default function LiveMap({
       attributionControl: false,
     });
 
-    // Dark map tiles
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      maxZoom: 19,
-    }).addTo(map);
-
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     L.control.attribution({ position: 'bottomleft', prefix: '© OpenStreetMap © CARTO' }).addTo(map);
 
@@ -112,6 +119,22 @@ export default function LiveMap({
       mapInstanceRef.current = null;
     };
   }, []);
+
+  // Swap tile layer when theme changes
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    if (tileLayerRef.current) {
+      map.removeLayer(tileLayerRef.current);
+    }
+
+    const tileUrl = mapTheme === 'light'
+      ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+      : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+
+    tileLayerRef.current = L.tileLayer(tileUrl, { maxZoom: 19 }).addTo(map);
+  }, [mapTheme]);
 
   // Render/update station markers when route changes
   useEffect(() => {
@@ -176,13 +199,13 @@ export default function LiveMap({
 
     // Draw each segment as a differently-styled polyline
     const pathLayers = segments.map(({ type, points }) => {
-      const color = SEGMENT_COLORS[type] || '#3d8ef8';
-      const isDashed = type !== 'metro';
+      const isMetro = type === 'metro';
+      const color = SEGMENT_COLORS[type] || SEGMENT_COLORS.transit;
       return L.polyline(points, {
         color,
-        weight: type === 'metro' ? 4 : 2.5,
-        opacity: 0.9,
-        dashArray: isDashed ? '8 6' : null,
+        weight: isMetro ? 4 : 2,
+        opacity: isMetro ? 0.9 : 0.55,
+        dashArray: isMetro ? null : '6 5',
         lineCap: 'round',
         lineJoin: 'round',
       }).addTo(map);
@@ -209,8 +232,7 @@ export default function LiveMap({
       <div ref={mapRef} className={styles.map} />
       <div className={styles.legend}>
         <LegendItem color={SEGMENT_COLORS.metro} label="Metro" />
-        <LegendItem color={SEGMENT_COLORS.walking} dashed label="Walking" />
-        <LegendItem color={SEGMENT_COLORS.vehicle} dashed label="Vehicle" />
+        <LegendItem color={SEGMENT_COLORS.transit} dashed label="Transit" />
       </div>
     </div>
   );
@@ -221,7 +243,7 @@ function LegendItem({ color, label, dashed }) {
     <div className={styles.legendItem}>
       <svg width="28" height="8" viewBox="0 0 28 8">
         {dashed ? (
-          <line x1="2" y1="4" x2="26" y2="4" stroke={color} strokeWidth="2.5" strokeDasharray="6 4" strokeLinecap="round" />
+          <line x1="2" y1="4" x2="26" y2="4" stroke={color} strokeWidth="2" strokeDasharray="6 5" strokeLinecap="round" opacity="0.7" />
         ) : (
           <line x1="2" y1="4" x2="26" y2="4" stroke={color} strokeWidth="3" strokeLinecap="round" />
         )}

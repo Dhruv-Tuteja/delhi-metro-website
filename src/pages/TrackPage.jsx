@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useTrackingSocket } from '../hooks/useTrackingSocket';
 import LiveMap from '../components/LiveMap';
 import StationList from '../components/StationList';
@@ -88,7 +88,7 @@ function TrackingIdEntry({ onSubmit }) {
 
 // ─── Live tracking view ──────────────────────────────────────────────────────
 
-function LiveTrackingView({ trackingId, onBack }) {
+function LiveTrackingView({ trackingId }) {
   const {
     session,
     locationHistory,
@@ -120,7 +120,7 @@ function LiveTrackingView({ trackingId, onBack }) {
       {/* Left sidebar */}
       <aside className={styles.sidebar}>
         <div className={styles.sidebarHeader}>
-          <button className={styles.backBtn} onClick={onBack}>
+          <button className={styles.backBtn} onClick={() => navigate('/')}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
               <path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
@@ -206,9 +206,217 @@ function MetaChip({ icon, label, success }) {
   );
 }
 
+
+// ─── Trip Replay View ────────────────────────────────────────────────────────
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+
+function ReplayView({ trackingId }) {
+  const navigate = useNavigate();
+  const [replay, setReplay] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Playback state
+  const [playIndex, setPlayIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [speed, setSpeed] = useState(10); // 10x default
+  const intervalRef = useRef(null);
+
+  useEffect(() => {
+    fetch(`${BACKEND_URL}/api/sessions/${trackingId}/replay`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) {
+          setReplay(data.replay);
+          setPlayIndex(data.replay.gpsPath.length > 0 ? 0 : 0);
+        } else {
+          setError(data.message || 'Replay data not found');
+        }
+      })
+      .catch(() => setError('Failed to load replay data'))
+      .finally(() => setLoading(false));
+  }, [trackingId]);
+
+  // Playback tick
+  useEffect(() => {
+    if (!isPlaying || !replay) return;
+    intervalRef.current = setInterval(() => {
+      setPlayIndex((prev) => {
+        if (prev >= replay.gpsPath.length - 1) {
+          setIsPlaying(false);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, 100 / speed); // faster speed = shorter interval
+
+    return () => clearInterval(intervalRef.current);
+  }, [isPlaying, speed, replay]);
+
+  if (loading) return (
+    <div className={styles.trackingLayout}>
+      <aside className={styles.sidebar}>
+        <div className={styles.sidebarHeader}>
+          <button className={styles.backBtn} onClick={() => navigate(-1)}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        </div>
+        <div style={{padding:'2rem',color:'var(--color-text-muted)',textAlign:'center'}}>Loading replay…</div>
+      </aside>
+      <main className={styles.mapArea}><div className={styles.mapContainer} /></main>
+    </div>
+  );
+
+  if (error) return (
+    <div className={styles.trackingLayout}>
+      <aside className={styles.sidebar}>
+        <div className={styles.sidebarHeader}>
+          <button className={styles.backBtn} onClick={() => navigate(-1)}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        </div>
+        <div className={styles.errorCard}><p>{error}</p><p style={{fontSize:'0.8rem',marginTop:'0.5rem',color:'var(--color-text-muted)'}}>The trip may not have GPS data saved yet, or the tracking ID is invalid.</p></div>
+      </aside>
+      <main className={styles.mapArea}><div className={styles.mapContainer} /></main>
+    </div>
+  );
+
+  const visiblePath = replay.gpsPath.slice(0, playIndex + 1);
+  const progress = replay.gpsPath.length > 0 ? (playIndex / (replay.gpsPath.length - 1)) * 100 : 0;
+
+  // Compute which stations are "visited" at current replay position
+  const currentTimestamp = visiblePath[visiblePath.length - 1]?.timestamp || 0;
+  // All visited stations are shown once playback reaches the end
+  const replayVisitedIds = progress >= 99 ? replay.visitedStationIds : [];
+
+  const formatDate = (ts) => ts ? new Date(ts).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+  const formatDuration = (start, end) => {
+    if (!start || !end) return '—';
+    const mins = Math.floor((end - start) / 60000);
+    return mins < 60 ? `${mins}m` : `${Math.floor(mins/60)}h ${mins%60}m`;
+  };
+
+  return (
+    <div className={styles.trackingLayout}>
+      <aside className={styles.sidebar}>
+        <div className={styles.sidebarHeader}>
+          <button className={styles.backBtn} onClick={() => navigate(-1)}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+          <span className={styles.statusLabel} style={{color:'var(--color-accent)'}}>⏪ Replay</span>
+        </div>
+
+        <div className={styles.journeyHeader}>
+          <div className={styles.routeRow}>
+            <span className={styles.stationLabel}>{replay.sourceStation}</span>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" className={styles.arrowIcon}>
+              <path d="M5 12h14M12 5l7 7-7 7" stroke="var(--color-text-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            <span className={styles.stationLabel}>{replay.destinationStation}</span>
+          </div>
+          <div className={styles.metaRow}>
+            <MetaChip icon="📅" label={formatDate(replay.startedAt)} />
+            <MetaChip icon="⏱" label={formatDuration(replay.startedAt, replay.endedAt)} />
+            <MetaChip icon="📍" label={`${replay.gpsPath.length} pts`} />
+          </div>
+        </div>
+
+        {/* Playback controls */}
+        <div style={{padding:'1rem 1.25rem',borderBottom:'1px solid var(--color-border)'}}>
+          {/* Progress bar */}
+          <div style={{position:'relative',height:'4px',background:'var(--color-surface-2)',borderRadius:'2px',marginBottom:'1rem',cursor:'pointer'}}
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const ratio = (e.clientX - rect.left) / rect.width;
+              setPlayIndex(Math.floor(ratio * (replay.gpsPath.length - 1)));
+            }}>
+            <div style={{position:'absolute',left:0,top:0,height:'100%',width:`${progress}%`,background:'var(--color-accent)',borderRadius:'2px',transition:'width 0.1s'}} />
+          </div>
+
+          <div style={{display:'flex',alignItems:'center',gap:'0.75rem'}}>
+            {/* Rewind */}
+            <button onClick={() => { setIsPlaying(false); setPlayIndex(0); }} style={ctrlBtn}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+            </button>
+
+            {/* Play/Pause */}
+            <button onClick={() => {
+              if (playIndex >= replay.gpsPath.length - 1) setPlayIndex(0);
+              setIsPlaying(p => !p);
+            }} style={{...ctrlBtn, background:'var(--color-accent)', color:'#fff', width:'36px', height:'36px', borderRadius:'50%'}}>
+              {isPlaying
+                ? <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                : <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              }
+            </button>
+
+            {/* Speed selector */}
+            <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))}
+              style={{marginLeft:'auto',background:'var(--color-surface-2)',color:'var(--color-text)',border:'1px solid var(--color-border)',borderRadius:'6px',padding:'4px 8px',fontSize:'0.8rem',cursor:'pointer'}}>
+              <option value={1}>1×</option>
+              <option value={5}>5×</option>
+              <option value={10}>10×</option>
+              <option value={30}>30×</option>
+              <option value={60}>60×</option>
+            </select>
+          </div>
+
+          <p style={{marginTop:'0.75rem',fontSize:'0.75rem',color:'var(--color-text-muted)'}}>
+            Point {playIndex + 1} of {replay.gpsPath.length}
+            {replay.gpsPath[playIndex]?.timestamp && (
+              <> · {new Date(replay.gpsPath[playIndex].timestamp).toLocaleTimeString('en-IN')}</>
+            )}
+          </p>
+        </div>
+
+        <div className={styles.stationListWrap}>
+          <StationList
+            stationRoute={replay.stationRoute}
+            visitedStationIds={replayVisitedIds}
+          />
+        </div>
+      </aside>
+
+      <main className={styles.mapArea}>
+        <div className={styles.mapContainer}>
+          <LiveMap
+            stationRoute={replay.stationRoute}
+            visitedStationIds={replayVisitedIds}
+            locationHistory={visiblePath}
+            destinationStationId={replay.stationRoute?.[replay.stationRoute.length - 1]?.stationId}
+            isActive={false}
+          />
+        </div>
+        {progress >= 99 && (
+          <div className={styles.endedBanner}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Replay complete · {replay.destinationStation}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+const ctrlBtn = {
+  display:'flex',alignItems:'center',justifyContent:'center',
+  background:'var(--color-surface-2)',color:'var(--color-text)',
+  border:'1px solid var(--color-border)',borderRadius:'8px',
+  width:'32px',height:'32px',cursor:'pointer',flexShrink:0,
+};
+
 // ─── Page root ───────────────────────────────────────────────────────────────
 
-export default function TrackPage() {
+export default function TrackPage({ isReplay = false }) {
   const { trackingId: paramId } = useParams();
   const navigate = useNavigate();
   const [activeId, setActiveId] = useState(paramId || null);
@@ -218,13 +426,13 @@ export default function TrackPage() {
     navigate(`/track/${id}`, { replace: true });
   }, [navigate]);
 
-  const handleBack = useCallback(() => {
-    setActiveId(null);
-    navigate('/', { replace: true });
-  }, [navigate]);
+  // /replay/:trackingId
+  if (isReplay && paramId) {
+    return <ReplayView trackingId={paramId} />;
+  }
 
   if (activeId) {
-    return <LiveTrackingView trackingId={activeId} onBack={handleBack} />;
+    return <LiveTrackingView trackingId={activeId} />;
   }
 
   return (
