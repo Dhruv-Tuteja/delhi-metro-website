@@ -234,8 +234,13 @@ function ReplayView({ trackingId }) {
   // Playback state
   const [playIndex, setPlayIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [speed, setSpeed] = useState(10); // 10x default
-  const intervalRef = useRef(null);
+  const [speed, setSpeed] = useState(10);
+  const rafRef = useRef(null);
+  const lastRafTime = useRef(null);   // wall-clock time of last RAF tick
+  const playIndexRef = useRef(0);     // shadow ref so RAF closure always has latest index
+
+  // Keep ref in sync with state
+  useEffect(() => { playIndexRef.current = playIndex; }, [playIndex]);
 
   useEffect(() => {
     fetch(`${BACKEND_URL}/api/sessions/${trackingId}/replay`)
@@ -243,7 +248,8 @@ function ReplayView({ trackingId }) {
       .then((data) => {
         if (data.success) {
           setReplay(data.replay);
-          setPlayIndex(data.replay.gpsPath.length > 0 ? 0 : 0);
+          setPlayIndex(0);
+          playIndexRef.current = 0;
         } else {
           setError(data.message || 'Replay data not found');
         }
@@ -252,20 +258,61 @@ function ReplayView({ trackingId }) {
       .finally(() => setLoading(false));
   }, [trackingId]);
 
-  // Playback tick
+  // Timestamp-aware playback using requestAnimationFrame
+  // Each RAF tick advances the index by however many real ms have passed * speed,
+  // mapped against the actual GPS timestamp gaps — so 1x = real time, 10x = 10× faster.
   useEffect(() => {
-    if (!isPlaying || !replay) return;
-    intervalRef.current = setInterval(() => {
-      setPlayIndex((prev) => {
-        if (prev >= replay.gpsPath.length - 1) {
-          setIsPlaying(false);
-          return prev;
-        }
-        return prev + 1;
-      });
-    }, 100 / speed); // faster speed = shorter interval
+    if (!isPlaying || !replay || replay.gpsPath.length < 2) return;
 
-    return () => clearInterval(intervalRef.current);
+    const path = replay.gpsPath;
+    const tripStart = path[0].timestamp;
+    const tripEnd = path[path.length - 1].timestamp;
+    const tripDuration = tripEnd - tripStart; // real ms of the trip
+
+    lastRafTime.current = null;
+
+    const tick = (now) => {
+      if (!lastRafTime.current) {
+        lastRafTime.current = now;
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      const wallDelta = now - lastRafTime.current; // ms since last frame
+      lastRafTime.current = now;
+
+      const currentIdx = playIndexRef.current;
+      if (currentIdx >= path.length - 1) {
+        setIsPlaying(false);
+        return;
+      }
+
+      // How far into the trip are we in real-trip-time?
+      const currentTripTime = path[currentIdx].timestamp - tripStart;
+      // Advance by wallDelta * speed ms of trip time
+      const targetTripTime = currentTripTime + wallDelta * speed;
+
+      // Find the GPS point whose timestamp matches targetTripTime
+      let nextIdx = currentIdx;
+      while (
+        nextIdx < path.length - 1 &&
+        (path[nextIdx].timestamp - tripStart) < targetTripTime
+      ) {
+        nextIdx++;
+      }
+
+      if (nextIdx !== currentIdx) {
+        setPlayIndex(nextIdx);
+        playIndexRef.current = nextIdx;
+      }
+
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
   }, [isPlaying, speed, replay]);
 
   if (loading) return (
@@ -303,9 +350,20 @@ function ReplayView({ trackingId }) {
   const visiblePath = replay.gpsPath.slice(0, playIndex + 1);
   const progress = replay.gpsPath.length > 0 ? (playIndex / (replay.gpsPath.length - 1)) * 100 : 0;
 
-  // Mark stations progressively as playback advances
-  // visitedStationIds is ordered source→destination, so slice by progress fraction
-  const visitedCount = Math.ceil((progress / 100) * replay.visitedStationIds.length);
+  // Mark stations by comparing current GPS timestamp to trip timeline.
+  // We divide the trip duration equally across visited stations as the best
+  // approximation (station checkpoint timestamps aren't stored in gpsPath).
+  const currentTs = replay.gpsPath[playIndex]?.timestamp || 0;
+  const tripStartTs = replay.gpsPath[0]?.timestamp || 0;
+  const tripEndTs = replay.gpsPath[replay.gpsPath.length - 1]?.timestamp || 1;
+  const tripElapsed = currentTs - tripStartTs;
+  const tripTotal = tripEndTs - tripStartTs || 1;
+  const stationCount = replay.visitedStationIds.length;
+  // Each station is "visited" when we pass its proportional time slot
+  const visitedCount = replay.visitedStationIds.reduce((acc, _, i) => {
+    const stationTime = ((i + 1) / stationCount) * tripTotal;
+    return tripElapsed >= stationTime ? acc + 1 : acc;
+  }, 0);
   const replayVisitedIds = replay.visitedStationIds.slice(0, visitedCount);
 
   const formatDate = (ts) => ts ? new Date(ts).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
