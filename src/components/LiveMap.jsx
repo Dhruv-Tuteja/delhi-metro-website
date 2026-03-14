@@ -3,31 +3,26 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import styles from './LiveMap.module.css';
 
-// Fix Leaflet default marker icon in bundlers
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
-// Segment path colors
 const SEGMENT_COLORS = {
-  metro:   '#3d8ef8',  // Blue  — confirmed metro leg
-  transit: '#94a3b8',  // Slate — everything else (walking, rickshaw, waiting)
+  metro:   '#3d8ef8',
+  transit: '#94a3b8',
 };
 
-/**
- * Creates an SVG-based Leaflet DivIcon for a metro station marker.
- * Visited stations are highlighted; the destination gets a special icon.
- */
 function createStationIcon(station, isVisited, isDestination) {
-  const lineColor = station.lineColor || '#3d8ef8';
-  const size = isDestination ? 14 : 10;
+  const lineColor   = station.lineColor || '#3d8ef8';
+  const size        = isDestination ? 14 : 10;
   const borderColor = isVisited ? lineColor : '#2a3a55';
-  const fill = isVisited ? lineColor : '#1c2638';
-  const outerRing = isDestination ? `<circle cx="16" cy="16" r="14" fill="none" stroke="${lineColor}" stroke-width="1.5" opacity="0.4"/>` : '';
-
+  const fill        = isVisited ? lineColor : '#1c2638';
+  const outerRing   = isDestination
+    ? `<circle cx="16" cy="16" r="14" fill="none" stroke="${lineColor}" stroke-width="1.5" opacity="0.4"/>`
+    : '';
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
       ${outerRing}
@@ -35,59 +30,67 @@ function createStationIcon(station, isVisited, isDestination) {
       ${isVisited ? `<circle cx="16" cy="16" r="${size - 4}" fill="${lineColor}" opacity="0.5"/>` : ''}
     </svg>
   `;
-  return L.divIcon({
-    html: svg,
-    className: '',
-    iconSize: [32, 32],
-    iconAnchor: [16, 16],
-    popupAnchor: [0, -18],
-  });
+  return L.divIcon({ html: svg, className: '', iconSize: [32, 32], iconAnchor: [16, 16], popupAnchor: [0, -18] });
 }
 
-/**
- * Creates the live position marker (pulsing blue dot).
- */
 function createLivePositionIcon() {
   const html = `
     <div style="
       width:16px; height:16px;
-      background: #3d8ef8;
-      border: 3px solid #fff;
-      border-radius: 50%;
-      box-shadow: 0 0 0 0 rgba(61,142,248,0.5);
-      animation: pulse-glow 2s infinite;
+      background:#3d8ef8;
+      border:3px solid #fff;
+      border-radius:50%;
+      box-shadow:0 0 0 0 rgba(61,142,248,0.5);
+      animation:pulse-glow 2s infinite;
     "></div>
   `;
   return L.divIcon({ html, className: '', iconSize: [16, 16], iconAnchor: [8, 8] });
 }
 
+// Replay marker — solid dot, no pulse, slightly larger
+function createReplayPositionIcon() {
+  const html = `
+    <div style="
+      width:14px; height:14px;
+      background:#3d8ef8;
+      border:3px solid #fff;
+      border-radius:50%;
+      box-shadow:0 2px 8px rgba(61,142,248,0.6);
+    "></div>
+  `;
+  return L.divIcon({ html, className: '', iconSize: [14, 14], iconAnchor: [7, 7] });
+}
+
 /**
- * LiveMap — renders the Leaflet map, GPS path, and station markers.
+ * LiveMap
  *
  * Props:
- *   stationRoute      — full ordered station array for the route
- *   visitedStationIds — IDs of stations already crossed
- *   locationHistory   — array of { lat, lng, segment } GPS points
+ *   stationRoute         — full ordered station array
+ *   visitedStationIds    — IDs of stations already crossed
+ *   locationHistory      — array of { lat, lng, segment } GPS points (draws the trail)
+ *   currentPosition      — { lat, lng } interpolated position (replay smooth marker)
  *   destinationStationId — highlights the destination marker
- *   isActive          — whether journey is still in progress
+ *   isActive             — live journey in progress (shows pulsing dot + auto-pan)
  */
 export default function LiveMap({
   stationRoute = [],
   visitedStationIds = [],
   locationHistory = [],
+  currentPosition = null,
   destinationStationId,
   isActive,
 }) {
-  const mapRef = useRef(null);
+  const mapRef         = useRef(null);
   const mapInstanceRef = useRef(null);
-  const layersRef = useRef({
-    path: null,
-    liveMarker: null,
+  const tileLayerRef   = useRef(null);
+  const layersRef      = useRef({
+    path:           null,
+    liveMarker:     null,  // pulsing dot for live tracking
+    replayMarker:   null,  // smooth dot for replay
     stationMarkers: new Map(),
   });
 
-  const tileLayerRef = useRef(null);
-
+  // ── Tile layer helpers ──
   const getTileUrl = () => {
     const theme = document.documentElement.getAttribute('data-theme') || 'dark';
     return theme === 'light'
@@ -100,7 +103,7 @@ export default function LiveMap({
     tileLayerRef.current = L.tileLayer(getTileUrl(), { maxZoom: 19 }).addTo(map);
   };
 
-  // Initialize map on mount — tile layer applied immediately with correct theme
+  // ── Init map ──
   useEffect(() => {
     if (mapInstanceRef.current) return;
 
@@ -114,11 +117,9 @@ export default function LiveMap({
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     L.control.attribution({ position: 'bottomleft', prefix: '© OpenStreetMap © CARTO' }).addTo(map);
 
-    // Apply correct tile layer immediately on init
     applyTileLayer(map);
     mapInstanceRef.current = map;
 
-    // Watch for theme changes and swap tiles live
     const observer = new MutationObserver(() => {
       if (mapInstanceRef.current) applyTileLayer(mapInstanceRef.current);
     });
@@ -131,7 +132,7 @@ export default function LiveMap({
     };
   }, []);
 
-  // Render/update station markers when route changes
+  // ── Station markers ──
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || stationRoute.length === 0) return;
@@ -139,9 +140,9 @@ export default function LiveMap({
     const { stationMarkers } = layersRef.current;
 
     stationRoute.forEach((station) => {
-      const isVisited = visitedStationIds.includes(station.stationId);
+      const isVisited     = visitedStationIds.includes(station.stationId);
       const isDestination = station.stationId === destinationStationId;
-      const icon = createStationIcon(station, isVisited, isDestination);
+      const icon          = createStationIcon(station, isVisited, isDestination);
 
       if (stationMarkers.has(station.stationId)) {
         stationMarkers.get(station.stationId).setIcon(icon);
@@ -161,72 +162,91 @@ export default function LiveMap({
     });
   }, [stationRoute, visitedStationIds, destinationStationId]);
 
-  // Draw GPS path segments and update live marker
+  // ── GPS trail ──
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || locationHistory.length === 0) return;
 
     const layers = layersRef.current;
 
-    // Remove old path
-    if (layers.path) {
-      layers.path.forEach((l) => map.removeLayer(l));
-    }
+    if (layers.path) layers.path.forEach((l) => map.removeLayer(l));
 
-    // Build segments of consecutive same-type points
+    // Group consecutive same-segment points
     const segments = [];
-    let currentSegment = { type: locationHistory[0].segment, points: [[locationHistory[0].lat, locationHistory[0].lng]] };
+    let cur = { type: locationHistory[0].segment, points: [[locationHistory[0].lat, locationHistory[0].lng]] };
 
     for (let i = 1; i < locationHistory.length; i++) {
-      const point = locationHistory[i];
-      const latlng = [point.lat, point.lng];
-
-      if (point.segment === currentSegment.type) {
-        currentSegment.points.push(latlng);
+      const pt     = locationHistory[i];
+      const latlng = [pt.lat, pt.lng];
+      if (pt.segment === cur.type) {
+        cur.points.push(latlng);
       } else {
-        // Bridge gap between segments
-        currentSegment.points.push(latlng);
-        segments.push({ ...currentSegment });
-        currentSegment = { type: point.segment, points: [latlng] };
+        cur.points.push(latlng); // bridge gap
+        segments.push({ ...cur });
+        cur = { type: pt.segment, points: [latlng] };
       }
     }
-    segments.push(currentSegment);
+    segments.push(cur);
 
-    // Draw each segment as a differently-styled polyline
-    const pathLayers = segments.map(({ type, points }) => {
+    layers.path = segments.map(({ type, points }) => {
       const isMetro = type === 'metro';
-      const color = SEGMENT_COLORS[type] || SEGMENT_COLORS.transit;
       return L.polyline(points, {
-        color,
-        weight: isMetro ? 4 : 2,
-        opacity: isMetro ? 0.9 : 0.55,
+        color:     SEGMENT_COLORS[type] || SEGMENT_COLORS.transit,
+        weight:    isMetro ? 4 : 2,
+        opacity:   isMetro ? 0.9 : 0.55,
         dashArray: isMetro ? null : '6 5',
-        lineCap: 'round',
+        lineCap:  'round',
         lineJoin: 'round',
       }).addTo(map);
     });
 
-    layers.path = pathLayers;
-
-    // Update live position marker
-    const last = locationHistory[locationHistory.length - 1];
-    if (last && isActive) {
+    // Live tracking marker + auto-pan (only when isActive)
+    if (isActive) {
+      const last   = locationHistory[locationHistory.length - 1];
       const latlng = [last.lat, last.lng];
       if (layers.liveMarker) {
         layers.liveMarker.setLatLng(latlng);
       } else {
         layers.liveMarker = L.marker(latlng, { icon: createLivePositionIcon(), zIndexOffset: 1000 }).addTo(map);
       }
-      // Pan map to follow
       map.panTo(latlng, { animate: true, duration: 0.8 });
     }
   }, [locationHistory, isActive]);
+
+  // ── Smooth replay marker — updates every RAF frame via currentPosition ──
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !currentPosition) return;
+
+    const layers = layersRef.current;
+    const latlng = [currentPosition.lat, currentPosition.lng];
+
+    if (layers.replayMarker) {
+      layers.replayMarker.setLatLng(latlng);
+    } else {
+      layers.replayMarker = L.marker(latlng, {
+        icon: createReplayPositionIcon(),
+        zIndexOffset: 1000,
+      }).addTo(map);
+    }
+
+    // Pan to follow replay marker (smooth, no jarring)
+    map.panTo(latlng, { animate: true, duration: 0.3 });
+  }, [currentPosition]);
+
+  // ── Clean up replay marker when currentPosition becomes null (e.g. on reset) ──
+  useEffect(() => {
+    if (currentPosition === null && layersRef.current.replayMarker) {
+      mapInstanceRef.current?.removeLayer(layersRef.current.replayMarker);
+      layersRef.current.replayMarker = null;
+    }
+  }, [currentPosition]);
 
   return (
     <div className={styles.wrapper}>
       <div ref={mapRef} className={styles.map} />
       <div className={styles.legend}>
-        <LegendItem color={SEGMENT_COLORS.metro} label="Metro" />
+        <LegendItem color={SEGMENT_COLORS.metro}   label="Metro" />
         <LegendItem color={SEGMENT_COLORS.transit} dashed label="Transit" />
       </div>
     </div>
@@ -237,11 +257,10 @@ function LegendItem({ color, label, dashed }) {
   return (
     <div className={styles.legendItem}>
       <svg width="28" height="8" viewBox="0 0 28 8">
-        {dashed ? (
-          <line x1="2" y1="4" x2="26" y2="4" stroke={color} strokeWidth="2" strokeDasharray="6 5" strokeLinecap="round" opacity="0.7" />
-        ) : (
-          <line x1="2" y1="4" x2="26" y2="4" stroke={color} strokeWidth="3" strokeLinecap="round" />
-        )}
+        {dashed
+          ? <line x1="2" y1="4" x2="26" y2="4" stroke={color} strokeWidth="2" strokeDasharray="6 5" strokeLinecap="round" opacity="0.7" />
+          : <line x1="2" y1="4" x2="26" y2="4" stroke={color} strokeWidth="3" strokeLinecap="round" />
+        }
       </svg>
       <span>{label}</span>
     </div>
