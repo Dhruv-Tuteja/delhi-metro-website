@@ -107,6 +107,7 @@ export function useTrackingSocket(trackingId) {
 
     socket.on('reconnect', () => {
       setConnectionStatus('connected');
+      setSignalLost(false); // clear stale signal-lost state immediately on reconnect
       socket.emit('viewer:join', { trackingId });
     });
   }, [trackingId]);
