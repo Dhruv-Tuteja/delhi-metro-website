@@ -45,6 +45,7 @@ export function useTrackingSocket(trackingId) {
 
     socket.on('connect', () => {
       setConnectionStatus('connected');
+      setSignalLost(false); // clear stale state when we (re)connect
       // Join the tracking room as a viewer
       socket.emit('viewer:join', { trackingId });
     });
